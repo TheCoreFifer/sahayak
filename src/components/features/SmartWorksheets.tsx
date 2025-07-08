@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { FiUpload, FiImage, FiLayers, FiDownload, FiRefreshCw, FiCheck, FiX, FiTarget, FiBookOpen, FiUsers, FiEdit3, FiEye, FiChevronDown, FiFileText, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 
 interface WorksheetLevel {
@@ -56,6 +56,18 @@ const SmartWorksheets: React.FC = () => {
     'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 
     'Grade 6', 'Grade 7', 'Grade 8', 'Grade 9', 'Grade 10'
   ];
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setDownloadDropdown({});
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, []);
 
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -663,9 +675,9 @@ const SmartWorksheets: React.FC = () => {
                 Generated Worksheets ({worksheets.length})
               </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 overflow-visible">
                 {worksheets.map((worksheet, index) => (
-                  <div key={index} className="bg-gradient-to-br from-white to-gray-50 border-2 border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all duration-300 hover:border-gray-300">
+                  <div key={index} className="bg-gradient-to-br from-white to-gray-50 border-2 border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all duration-300 hover:border-gray-300 relative overflow-visible">
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center space-x-2">
                         <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
@@ -710,7 +722,10 @@ const SmartWorksheets: React.FC = () => {
                       
                       <div className="relative">
                         <button
-                          onClick={() => toggleDownloadDropdown(index)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleDownloadDropdown(index);
+                          }}
                           className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
                         >
                           <FiDownload className="w-4 h-4" />
@@ -719,17 +734,26 @@ const SmartWorksheets: React.FC = () => {
                         </button>
                         
                         {downloadDropdown[index] && (
-                          <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
+                          <div 
+                            className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <button
-                              onClick={() => downloadWorksheet(worksheet, false)}
-                              className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 flex items-center space-x-2"
+                              onClick={() => {
+                                downloadWorksheet(worksheet, false);
+                                toggleDownloadDropdown(index);
+                              }}
+                              className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 flex items-center space-x-2 rounded-t-lg"
                             >
                               <FiFileText className="w-4 h-4 text-gray-500" />
                               <span className="text-sm">Without Answers</span>
                             </button>
                             <button
-                              onClick={() => downloadWorksheet(worksheet, true)}
-                              className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center space-x-2"
+                              onClick={() => {
+                                downloadWorksheet(worksheet, true);
+                                toggleDownloadDropdown(index);
+                              }}
+                              className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center space-x-2 rounded-b-lg"
                             >
                               <FiCheckCircle className="w-4 h-4 text-green-500" />
                               <span className="text-sm">With Answers</span>

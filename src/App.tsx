@@ -1,3 +1,4 @@
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import './App.css';
 import Sidebar from './components/layout/Sidebar';
@@ -8,13 +9,20 @@ import SmartWorksheets from './components/features/SmartWorksheets';
 import QuestionGenerator from './components/features/QuestionGenerator';
 import KnowledgeBase from './components/features/KnowledgeBase';
 import VisualAids from './components/features/VisualAids';
+import WeeklyPlanner from './components/features/WeeklyPlanner';
 
 function App() {
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(!isSidebarCollapsed);
+  };
+
   return (
     <Router>
-              <div className="flex h-screen page-bg">
+      <div className="flex h-screen bg-gray-50">
         {/* Sidebar */}
-        <Sidebar />
+        <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />
         
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col">
@@ -31,22 +39,17 @@ function App() {
               <Route path="/questions" element={<QuestionGenerator />} />
               <Route path="/knowledge" element={<KnowledgeBase />} />
               <Route path="/visual" element={<VisualAids />} />
+              <Route path="/planner" element={<WeeklyPlanner />} />
               <Route path="/assessments" element={
                 <div className="p-8">
-                  <h2 className="text-3xl font-bold text-slate-800 mb-4">Audio Assessments</h2>
-                  <p className="text-slate-600 text-lg">Coming soon...</p>
+                  <h2 className="text-3xl font-normal text-gray-900 mb-4" style={{ fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif' }}>Audio Assessments</h2>
+                  <p className="text-gray-600 text-lg font-normal">Coming soon...</p>
                 </div>
               } />
               <Route path="/games" element={
                 <div className="p-8">
-                  <h2 className="text-3xl font-bold text-slate-800 mb-4">Educational Games</h2>
-                  <p className="text-slate-600 text-lg">Coming soon...</p>
-                </div>
-              } />
-              <Route path="/planner" element={
-                <div className="p-8">
-                  <h2 className="text-3xl font-bold text-slate-800 mb-4">Lesson Planner</h2>
-                  <p className="text-slate-600 text-lg">Coming soon...</p>
+                  <h2 className="text-3xl font-normal text-gray-900 mb-4" style={{ fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif' }}>Educational Games</h2>
+                  <p className="text-gray-600 text-lg font-normal">Coming soon...</p>
                 </div>
               } />
             </Routes>

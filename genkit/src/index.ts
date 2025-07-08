@@ -37,7 +37,8 @@ app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:5174', 
-    'http://localhost:5175'
+    'http://localhost:5175',
+    'http://localhost:5176' // Adding all possible dev ports
   ],
   credentials: true
 }));
@@ -45,7 +46,7 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -573,8 +574,13 @@ VERIFY YOUR COUNT MATCHES: ${numQuestions}
     
     res.json({
       success: true,
-      data: parsedQuestions,
-      duration: `${duration}ms`
+      questions: parsedQuestions.questions,
+      totalCount: parsedQuestions.totalCount,
+      duration: `${duration}ms`,
+      requested: numQuestions,
+      generated: parsedQuestions.questions.length,
+      match: numQuestions === parsedQuestions.totalCount,
+      model: 'gemini-2.0-flash'
     });
     
   } catch (error) {
@@ -759,14 +765,67 @@ Generate EXACTLY this JSON structure with comprehensive, culturally-relevant, te
     
     // Parse the comprehensive knowledge response
     let knowledgeData;
-    try {
+        try {
       const cleanedResponse = knowledgeResponse.trim()
         .replace(/```json\n?/g, '')
         .replace(/```\n?/g, '')
         .replace(/^[^{]*{/, '{')
         .replace(/}[^}]*$/, '}');
       
-      knowledgeData = JSON.parse(cleanedResponse);
+      let parsedData = JSON.parse(cleanedResponse);
+      
+      // 🔧 CHECK IF WE GOT OLD FORMAT AND CONVERT TO NEW FORMAT
+      if (parsedData.answer && !parsedData.explanations) {
+        console.log('🔄 Converting old API format to new comprehensive format...');
+        
+        knowledgeData = {
+          question: question,
+          subject: subject,
+          gradeLevel: grade,
+          language: language,
+          explanations: {
+            simple: parsedData.answer || 'Simple explanation not available',
+            detailed: `A more detailed explanation of "${question}": ${parsedData.answer}`,
+            analogy: parsedData.analogy || 'Analogy not available',
+            realWorld: `Real-world application: ${parsedData.answer}`
+          },
+          culturalContext: {
+            indianExamples: parsedData.examples || [],
+            localAnalogies: [parsedData.analogy || 'Local analogy not available'],
+            festivals: ['Connection to Indian festivals and traditions'],
+            dailyLife: ['How this concept appears in Indian daily life']
+          },
+          teachingResources: {
+            commonMisconceptions: ['Common student misconceptions about this topic'],
+            teachingTips: ['Practical teaching tips for this concept'],
+            demonstrations: [parsedData.activity || 'Simple classroom demonstration'],
+            activities: [parsedData.activity || 'Hands-on learning activity'],
+            materials: ['Basic classroom materials needed']
+          },
+          visualSuggestions: {
+            simpleDrawings: ['Simple diagram for blackboard'],
+            experiments: [parsedData.activity || 'Simple experiment'],
+            gestures: ['Hand gestures to explain concept']
+          },
+          relatedQuestions: [
+            `What happens when ${question.toLowerCase().replace('why', 'how')}?`,
+            `How does this relate to other concepts?`,
+            `What are practical applications of this?`
+          ],
+          difficulty: 'intermediate',
+          estimatedTime: '10 minutes explanation + 15 minutes activity',
+          gradeAdaptations: {
+            'grades1-2': 'Very simple explanation with pictures',
+            'grades3-5': parsedData.answer,
+            'grades6-8': `More detailed: ${parsedData.answer}`,
+            'grades9-10': 'Advanced explanation with scientific details'
+          }
+        };
+        
+        console.log('✅ Successfully converted old format to new comprehensive format');
+      } else {
+        knowledgeData = parsedData;
+      }
       
       console.log('✅ Knowledge Parsing: SUCCESS');
       console.log('📊 Extracted Knowledge Data:');
@@ -779,10 +838,10 @@ Generate EXACTLY this JSON structure with comprehensive, culturally-relevant, te
       console.log(`- Teaching Resources: ${Object.keys(knowledgeData.teachingResources || {}).length}`);
       console.log(`- Related Questions: ${knowledgeData.relatedQuestions?.length || 0}`);
       
-         } catch (parseError) {
-       console.log('❌ Knowledge Parsing: FAILED');
-       console.log(`- Parse Error: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
-       console.log('📝 Raw Response:', knowledgeResponse.substring(0, 500));
+    } catch (parseError) {
+      console.log('❌ Knowledge Parsing: FAILED');
+      console.log(`- Parse Error: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
+      console.log('📝 Raw Response:', knowledgeResponse.substring(0, 500));
       
       // 🔧 COMPREHENSIVE FALLBACK KNOWLEDGE RESPONSE
       knowledgeData = {
@@ -1413,6 +1472,386 @@ app.post('/api/process-file', upload.single('file'), async (req, res): Promise<v
   }
 });
 
+// Weekly Lesson Plan Generation API
+app.post('/api/generate-weekly-plan', async (req, res) => {
+  try {
+    console.log('📅 === WEEKLY LESSON PLAN GENERATION REQUEST ===');
+    const startTime = Date.now();
+    
+    const { analyzedContent, targetGrades, numberOfWeeks = 1 } = req.body;
+    
+    console.log('📊 Weekly Plan Generation Details:');
+    console.log(`- Topic: ${analyzedContent.topic}`);
+    console.log(`- Target Grades: ${targetGrades.join(', ')}`);
+    console.log(`- Number of Weeks: ${numberOfWeeks}`);
+    console.log(`- Key Terms: ${analyzedContent.keyTerms.length} items`);
+    console.log(`- Concepts: ${analyzedContent.concepts.length} items`);
+
+    const weeklyPlans = [];
+    
+    for (let week = 1; week <= numberOfWeeks; week++) {
+      console.log(`\n📝 Generating plan for Week ${week}...`);
+      
+      const prompt = `You are Sahayak, an expert AI teaching assistant for Indian multi-grade classrooms.
+
+Create a detailed weekly lesson plan for Week ${week} based on this textbook analysis:
+
+TEXTBOOK ANALYSIS:
+- Topic: ${analyzedContent.topic}
+- Key Concepts: ${analyzedContent.concepts.join(', ')}
+- Key Terms: ${analyzedContent.keyTerms.join(', ')}
+- Target Grades: ${targetGrades.join(', ')}
+
+CRITICAL: You MUST respond with ONLY valid JSON in this EXACT format:
+
+{
+  "week": ${week},
+  "theme": "Week ${week} theme based on ${analyzedContent.topic}",
+  "overview": "Brief overview of what students will learn this week",
+  "learningObjectives": [
+    "Students will understand...",
+    "Students will be able to...",
+    "Students will analyze..."
+  ],
+  "dailyPlans": {
+    "monday": {
+      "day": "Monday",
+      "title": "Introduction to the Topic",
+      "duration": "45 minutes",
+      "activities": [
+        {
+          "time": "0-10 min",
+          "activity": "Warm-up and Review",
+          "description": "Quick review of previous knowledge",
+          "materials": ["Blackboard", "Chalk"],
+          "gradeAdaptation": "Simpler questions for younger grades"
+        },
+        {
+          "time": "10-25 min",
+          "activity": "Main Lesson",
+          "description": "Introduce key concepts using Indian cultural examples",
+          "materials": ["Textbook", "Local examples"],
+          "gradeAdaptation": "Different complexity levels for different grades"
+        },
+        {
+          "time": "25-40 min",
+          "activity": "Practice Activity",
+          "description": "Hands-on activity to reinforce learning",
+          "materials": ["Worksheets", "Group work"],
+          "gradeAdaptation": "Varied difficulty levels"
+        },
+        {
+          "time": "40-45 min",
+          "activity": "Wrap-up",
+          "description": "Summary and preview of next day",
+          "materials": ["Discussion"],
+          "gradeAdaptation": "Age-appropriate questioning"
+        }
+      ]
+    },
+    "tuesday": {
+      "day": "Tuesday",
+      "title": "Exploring Key Concepts",
+      "duration": "45 minutes",
+      "activities": [
+        {
+          "time": "0-10 min",
+          "activity": "Review and Connect",
+          "description": "Connect to Monday's lesson",
+          "materials": ["Blackboard", "Previous notes"],
+          "gradeAdaptation": "Visual aids for younger students"
+        },
+        {
+          "time": "10-30 min",
+          "activity": "Deep Dive",
+          "description": "Explore concepts in detail with Indian examples",
+          "materials": ["Local materials", "Stories"],
+          "gradeAdaptation": "More complex analysis for older grades"
+        },
+        {
+          "time": "30-40 min",
+          "activity": "Interactive Exercise",
+          "description": "Students work in mixed-grade groups",
+          "materials": ["Group activity materials"],
+          "gradeAdaptation": "Peer teaching opportunities"
+        },
+        {
+          "time": "40-45 min",
+          "activity": "Assessment",
+          "description": "Quick formative assessment",
+          "materials": ["Oral questions", "Quick write"],
+          "gradeAdaptation": "Different assessment methods"
+        }
+      ]
+    },
+    "wednesday": {
+      "day": "Wednesday",
+      "title": "Practical Applications",
+      "duration": "45 minutes",
+      "activities": [
+        {
+          "time": "0-10 min",
+          "activity": "Energizer",
+          "description": "Fun activity to start the day",
+          "materials": ["Simple games", "Movement"],
+          "gradeAdaptation": "Age-appropriate games"
+        },
+        {
+          "time": "10-35 min",
+          "activity": "Real-World Connections",
+          "description": "Connect learning to Indian daily life and culture",
+          "materials": ["Local examples", "Community connections"],
+          "gradeAdaptation": "Different complexity of connections"
+        },
+        {
+          "time": "35-45 min",
+          "activity": "Project Planning",
+          "description": "Plan weekend project or homework",
+          "materials": ["Project guidelines"],
+          "gradeAdaptation": "Differentiated project requirements"
+        }
+      ]
+    },
+    "thursday": {
+      "day": "Thursday",
+      "title": "Creative Expression",
+      "duration": "45 minutes",
+      "activities": [
+        {
+          "time": "0-10 min",
+          "activity": "Sharing Circle",
+          "description": "Students share insights or questions",
+          "materials": ["Circle seating"],
+          "gradeAdaptation": "Guided sharing for younger students"
+        },
+        {
+          "time": "10-35 min",
+          "activity": "Creative Project",
+          "description": "Art, drama, or storytelling related to the topic",
+          "materials": ["Art supplies", "Props"],
+          "gradeAdaptation": "Different creative mediums"
+        },
+        {
+          "time": "35-45 min",
+          "activity": "Presentation Prep",
+          "description": "Prepare for Friday presentations",
+          "materials": ["Presentation materials"],
+          "gradeAdaptation": "Varied presentation formats"
+        }
+      ]
+    },
+    "friday": {
+      "day": "Friday",
+      "title": "Review and Assessment",
+      "duration": "45 minutes",
+      "activities": [
+        {
+          "time": "0-20 min",
+          "activity": "Student Presentations",
+          "description": "Students present their work",
+          "materials": ["Presentation space"],
+          "gradeAdaptation": "Different presentation lengths"
+        },
+        {
+          "time": "20-35 min",
+          "activity": "Week Review",
+          "description": "Comprehensive review of week's learning",
+          "materials": ["Review materials", "Games"],
+          "gradeAdaptation": "Different review methods"
+        },
+        {
+          "time": "35-45 min",
+          "activity": "Assessment and Preview",
+          "description": "Assess understanding and preview next week",
+          "materials": ["Assessment tools"],
+          "gradeAdaptation": "Multiple assessment formats"
+        }
+      ]
+    }
+  },
+  "resources": {
+    "materials": ["Commonly available materials in Indian schools"],
+    "culturalConnections": ["Local festivals", "Community examples", "Regional traditions"],
+    "assessmentTools": ["Formative assessment methods", "Peer assessment", "Self-reflection"]
+  },
+  "homework": [
+    "Monday: Simple observation task",
+    "Tuesday: Practice exercise",
+    "Wednesday: Community connection activity",
+    "Thursday: Creative preparation",
+    "Friday: Reflection and preview"
+  ],
+  "adaptations": {
+    "lowerGrades": "Specific adaptations for younger students",
+    "higherGrades": "Extensions and challenges for older students",
+    "mixedGrade": "Strategies for multi-grade teaching"
+  }
+}
+
+RULES:
+- Focus on practical, implementable daily activities
+- Use authentic Indian cultural context throughout
+- Include specific time allocations for each activity
+- Provide clear multi-grade adaptations
+- Ensure activities use locally available materials
+- Make it immediately usable by teachers in resource-limited schools`;
+
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
+      
+      // Parse JSON response with better error handling
+      let parsedPlan;
+      try {
+        const cleanText = text.trim().replace(/```json|```/g, '');
+        parsedPlan = JSON.parse(cleanText);
+        console.log(`✅ Week ${week} Plan: SUCCESS - ${parsedPlan.dailyPlans ? Object.keys(parsedPlan.dailyPlans).length : 0} days`);
+      } catch (parseError) {
+        console.log(`❌ Week ${week} JSON parsing failed, using structured fallback`);
+        parsedPlan = {
+          week: week,
+          theme: `Week ${week}: ${analyzedContent.topic}`,
+          overview: `This week students will explore ${analyzedContent.topic} through various activities and cultural connections.`,
+          learningObjectives: [
+            `Students will understand the key concepts of ${analyzedContent.topic}`,
+            `Students will be able to apply learning to real-world situations`,
+            `Students will analyze the cultural significance of the topic`
+          ],
+          dailyPlans: {
+            monday: {
+              day: "Monday",
+              title: "Introduction to the Topic",
+              duration: "45 minutes",
+              activities: [
+                {
+                  time: "0-10 min",
+                  activity: "Warm-up and Review",
+                  description: "Quick review and introduction",
+                  materials: ["Blackboard", "Chalk"],
+                  gradeAdaptation: "Simpler questions for younger grades"
+                },
+                {
+                  time: "10-35 min",
+                  activity: "Main Lesson",
+                  description: `Introduce ${analyzedContent.topic} with Indian examples`,
+                  materials: ["Textbook", "Local examples"],
+                  gradeAdaptation: "Different complexity levels"
+                },
+                {
+                  time: "35-45 min",
+                  activity: "Wrap-up",
+                  description: "Summary and preview",
+                  materials: ["Discussion"],
+                  gradeAdaptation: "Age-appropriate questioning"
+                }
+              ]
+            },
+            tuesday: {
+              day: "Tuesday",
+              title: "Exploring Key Concepts",
+              duration: "45 minutes",
+              activities: [
+                {
+                  time: "0-45 min",
+                  activity: "Concept Exploration",
+                  description: "Deep dive into key concepts",
+                  materials: ["Various materials"],
+                  gradeAdaptation: "Multi-level activities"
+                }
+              ]
+            },
+            wednesday: {
+              day: "Wednesday",
+              title: "Practical Applications",
+              duration: "45 minutes",
+              activities: [
+                {
+                  time: "0-45 min",
+                  activity: "Real-world Connections",
+                  description: "Connect to daily life",
+                  materials: ["Local examples"],
+                  gradeAdaptation: "Different complexity"
+                }
+              ]
+            },
+            thursday: {
+              day: "Thursday",
+              title: "Creative Expression",
+              duration: "45 minutes",
+              activities: [
+                {
+                  time: "0-45 min",
+                  activity: "Creative Project",
+                  description: "Express learning creatively",
+                  materials: ["Art supplies"],
+                  gradeAdaptation: "Different mediums"
+                }
+              ]
+            },
+            friday: {
+              day: "Friday",
+              title: "Review and Assessment",
+              duration: "45 minutes",
+              activities: [
+                {
+                  time: "0-45 min",
+                  activity: "Review and Assess",
+                  description: "Week review and assessment",
+                  materials: ["Assessment tools"],
+                  gradeAdaptation: "Multiple formats"
+                }
+              ]
+            }
+          },
+          resources: {
+            materials: ["Blackboard", "Chalk", "Textbook", "Local materials"],
+            culturalConnections: ["Local festivals", "Community examples"],
+            assessmentTools: ["Oral questions", "Observation", "Peer assessment"]
+          },
+          homework: [
+            "Monday: Observation task",
+            "Tuesday: Practice exercise",
+            "Wednesday: Community activity",
+            "Thursday: Creative work",
+            "Friday: Reflection"
+          ],
+          adaptations: {
+            lowerGrades: "Simpler activities and visual aids",
+            higherGrades: "More complex analysis and projects",
+            mixedGrade: "Peer teaching and group work"
+          }
+        };
+      }
+      
+      weeklyPlans.push(parsedPlan);
+    }
+    
+    const processingTime = Date.now() - startTime;
+    console.log(`\n⏱️ Weekly plan generation completed in ${processingTime}ms`);
+    console.log(`📊 Generated ${weeklyPlans.length} weekly plans successfully`);
+    
+    res.json({
+      success: true,
+      data: {
+        weeklyPlans,
+        totalWeeks: numberOfWeeks,
+        targetGrades: targetGrades
+      },
+      metadata: {
+        processingTime,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Weekly Plan Generation Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Weekly plan generation failed' 
+    });
+  }
+});
+
 // Visual Aids Generation API (simplified)
 app.post('/api/generate-visual-aid', (req, res) => {
   const { description, subject, gradeLevel, complexity } = req.body;
@@ -1462,7 +1901,7 @@ const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, () => {
   console.log(`🚀 Sahayak Structured Server v3.0 running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
   console.log(`⚡ Direct Gemini 2.0 Flash (stable) with structured outputs`);
   console.log(`🎯 Rich content quality with cultural context`);
   console.log(`🇮🇳 Enhanced Indian cultural integration`);

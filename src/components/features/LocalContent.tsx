@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { generateContent, generateQuickExamples, healthCheck } from '../../services/api';
-import type { ContentRequest } from '../../services/api';
 import { 
   FiFileText, 
   FiStar, 
@@ -98,10 +97,10 @@ const LocalContent: React.FC = () => {
       const examplesRequest = { language, grade: gradeLevel, subject, location };
       const result = await generateQuickExamples(examplesRequest);
       
-      if (result.examples) {
-        setDynamicExamples(result.examples);
+      if (result.data && result.data.examples) {
+        setDynamicExamples(result.data.examples);
         setShowExamples(true);
-        console.log('✅ Generated examples on-demand:', result.examples);
+        console.log('✅ Generated examples on-demand:', result.data.examples);
       }
     } catch {
       setError('Failed to generate examples. Please try again.');
@@ -126,7 +125,7 @@ const LocalContent: React.FC = () => {
     setError(null);
 
     try {
-      const requestData: ContentRequest = {
+      const requestData = {
         description: request.trim(),
         language,
         grade: gradeLevel,
