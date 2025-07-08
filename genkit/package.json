@@ -1,0 +1,27 @@
+{
+  "name": "sahayak-structured-server",
+  "version": "3.0.0",
+  "description": "Fast structured AI server with direct Gemini integration for hackathon",
+  "main": "lib/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node lib/index.js",
+    "dev": "tsc && node lib/index.js",
+    "clean": "if exist lib (rmdir /s /q lib)"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@types/multer": "^2.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.1",
+    "multer": "^2.0.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
