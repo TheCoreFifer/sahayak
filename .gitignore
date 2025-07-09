@@ -25,4 +25,4 @@ dist-ssr
 
 genkit/node_modules
 genkit/.env
-genkit\service-account-key.json
+genkit/service-account-key.json
