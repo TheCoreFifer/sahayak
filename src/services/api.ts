@@ -29,6 +29,51 @@ export interface QuestionRequest {
     skills: string[];
 }
 
+export interface ReadingPassageRequest {
+    subject: string;
+    grade: string;
+    topic?: string;
+    language?: string;
+    culturalContext?: string;
+    length?: 'short' | 'medium' | 'long';
+}
+
+export interface AudioAssessmentRequest {
+    audioData: string;
+    originalText: string;
+    studentInfo: {
+        name: string;
+        grade: string;
+        subject: string;
+        topic: string;
+    };
+}
+
+export interface AssessmentResult {
+    accuracy: number;
+    fluencyScore: number;
+    wordsPerMinute: number;
+    pronunciationHotspots: string[];
+    positiveFeedback: string;
+    actionableTip: string;
+    detailedAnalysis: {
+        hesitations: { word: string; count: number }[];
+        mispronunciations: { word: string; correctSound: string }[];
+        pacing: {
+            overallPace: 'slow' | 'good' | 'fast';
+            sectionsOfConcern: { text: string; issue: string }[];
+        };
+        expressiveness: {
+            score: number;
+            feedback: string;
+        };
+    };
+    progress?: {
+        previousScore?: number;
+        improvement?: string;
+        trend?: 'improving' | 'steady' | 'needs_attention';
+    };
+}
 
 /**
  * Analyzes an uploaded textbook image.
@@ -186,5 +231,107 @@ export const generateWeeklyPlan = async (analyzedContent: any, targetGrades: str
         }),
     });
     if (!response.ok) throw new Error('Failed to generate weekly plan');
+    return response.json();
+}; 
+
+/**
+ * Generates a reading passage based on subject, grade, and other parameters.
+ * @param grade - The target grade level
+ * @param subject - The subject area
+ * @returns A generated passage suitable for reading assessment
+ */
+export const generateReadingPassage = async (grade: string, subject: string) => {
+  try {
+    console.log('📝 Sending passage request:', { grade, subject });
+    const response = await fetch(`${API_BASE_URL}/generate-passage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        grade,
+        subject,
+        language: 'English',
+        culturalContext: 'Indian educational context'
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      console.error('❌ Server error:', errorData || response.statusText);
+      throw new Error(errorData?.error || `Server error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ Received passage:', data);
+    
+    if (!data.success || !data.passage) {
+      console.error('❌ Invalid response format:', data);
+      throw new Error('Invalid response from server');
+    }
+
+    return data.passage;
+  } catch (error) {
+    console.error('❌ Error in generateReadingPassage:', error);
+    throw error;
+  }
+};
+
+export const analyzeAudioRecording = async (audioBlob: Blob, originalText: string, readingTime: number) => {
+  try {
+    const formData = new FormData();
+    formData.append('audio', audioBlob);
+    formData.append('originalText', originalText);
+    formData.append('studentInfo', JSON.stringify({
+      name: 'Student', // Will be filled in by the component
+      grade: '1', // Will be filled in by the component
+      subject: 'English' // Will be filled in by the component
+    }));
+
+    const response = await fetch(`${API_BASE_URL}/api/analyze-audio`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to analyze audio recording');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error analyzing audio recording:', error);
+    throw error;
+  }
+};
+
+/**
+ * Saves assessment results to Google Sheets for tracking progress
+ * @param studentName - Name of the student
+ * @param result - The assessment result to save
+ * @returns Success status and sheet URL
+ */
+export const saveToGoogleSheets = async (studentName: string, result: AssessmentResult) => {
+    const response = await fetch(`${API_BASE_URL}/save-assessment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentName, result }),
+    });
+    if (!response.ok) throw new Error('Failed to save to Google Sheets');
+    return response.json();
+};
+
+/**
+ * Generates a detailed assessment report as a Google Doc
+ * @param studentName - Name of the student
+ * @param result - The assessment result to include in the report
+ * @returns Success status and document URL
+ */
+export const generateGoogleDoc = async (studentName: string, result: AssessmentResult) => {
+    const response = await fetch(`${API_BASE_URL}/generate-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentName, result }),
+    });
+    if (!response.ok) throw new Error('Failed to generate Google Doc');
     return response.json();
 }; 

@@ -202,10 +202,9 @@ const SmartWorksheets: React.FC = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          analyzedContent,
-          targetGrades: selectedGrades,
-          questionTypes: selectedQuestionTypes,
-          imageData: uploadedImage?.split(',')[1]
+          analysis: analyzedContent,
+          selectedGrades: selectedGrades,
+          questionTypes: selectedQuestionTypes
         })
       });
 
@@ -221,8 +220,8 @@ const SmartWorksheets: React.FC = () => {
       console.log('📊 Worksheet Generation Response:', result);
       
       if (result.success) {
-        setWorksheets(result.data.worksheets);
-        console.log(`✅ Successfully generated ${result.data.worksheets.length} worksheets`);
+        setWorksheets(result.data || []);
+        console.log(`✅ Successfully generated ${result.data?.length || 0} worksheets`);
       } else {
         throw new Error(result.error || 'Worksheet generation failed - please try again');
       }

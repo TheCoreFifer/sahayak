@@ -3,10 +3,17 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
-import fs from 'fs';
 import path from 'path';
+import { diffWords } from 'diff';
+import { SpeechClient } from '@google-cloud/speech';
 // Load environment variables
 dotenv.config();
+// Initialize Google Cloud Speech client
+const speechClient = new SpeechClient();
+// Create async handler utility
+const asyncHandler = (fn) => (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+};
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -17,13 +24,13 @@ const upload = multer({
         fileSize: 10 * 1024 * 1024, // 10MB limit
     },
     fileFilter: (req, file, cb) => {
-        const allowedTypes = ['.pdf', '.doc', '.docx'];
+        const allowedTypes = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
         const fileExtension = path.extname(file.originalname).toLowerCase();
         if (allowedTypes.includes(fileExtension)) {
             cb(null, true);
         }
         else {
-            cb(new Error('Only PDF and Word documents are allowed'));
+            cb(new Error('Only PDF, Word, Image, and JPG/PNG/GIF/WebP files are allowed'));
         }
     }
 });
@@ -39,6 +46,77 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
+// Analyze textbook image endpoint
+app.post('/api/analyze-textbook', async (req, res) => {
+    try {
+        console.log('📸 Analyzing textbook image...');
+        const { imageData, fileType } = req.body;
+
+        if (!imageData) {
+            return res.status(400).json({ error: 'Image data is required' });
+        }
+
+        const prompt = `You are Sahayak, an expert AI teaching assistant for Indian classrooms.
+
+Analyze this textbook page image and extract educational content for creating differentiated worksheets.
+
+Provide a detailed analysis including:
+- topic: Main topic/subject covered (string)
+- keyTerms: Important vocabulary and terms (array of strings)
+- concepts: Key concepts and ideas (array of strings)  
+- difficulty: Difficulty level (easy/medium/hard)
+- suggestedGrades: Appropriate grade levels (array like ["Grade 3", "Grade 4", "Grade 5"])
+- imageDescription: Brief description of what's shown in the image
+- learningObjectives: What students should learn (array of strings)
+- culturalContext: Indian cultural relevance and examples
+
+CRITICAL: Respond with ONLY valid JSON in this exact format:
+{
+  "topic": "Main topic here",
+  "keyTerms": ["term1", "term2", "term3"],
+  "concepts": ["concept1", "concept2"],
+  "difficulty": "medium",
+  "suggestedGrades": ["Grade 3", "Grade 4", "Grade 5"],
+  "imageDescription": "Description of the textbook page",
+  "learningObjectives": ["objective1", "objective2"],
+  "culturalContext": "Indian context and examples"
+}`;
+
+        const result = await model.generateContent([
+            prompt,
+            {
+                inlineData: {
+                    data: imageData,
+                    mimeType: fileType
+                }
+            }
+        ]);
+
+        const text = result.response.text();
+        let analysis;
+
+        try {
+            const cleanText = text.trim().replace(/```json|```/g, '');
+            analysis = JSON.parse(cleanText);
+        } catch (parseError) {
+            console.error('❌ Failed to parse analysis from AI response', parseError);
+            console.error("Raw response was:", text);
+            throw new Error('Failed to parse analysis from AI response');
+        }
+
+        res.json({
+            success: true,
+            data: analysis
+        });
+
+    } catch (error) {
+        console.error('❌ Image analysis error:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to analyze image'
+        });
+    }
+});
 // Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({
@@ -908,878 +986,448 @@ Generate EXACTLY this JSON structure with comprehensive, culturally-relevant, te
         });
     }
 });
-// Placeholder removed - using actual implementation below
-// Smart Worksheets - Analyze Textbook Page
-app.post('/api/analyze-textbook', async (req, res) => {
-    const startTime = Date.now();
-    console.log('\n🔍 === TEXTBOOK ANALYSIS REQUEST ===');
-    try {
-        const { imageData, fileType } = req.body;
-        if (!imageData) {
-            res.status(400).json({
-                success: false,
-                error: 'No image data provided'
-            });
-            return;
-        }
-        console.log('📸 Image Analysis Details:');
-        console.log(`- File Type: ${fileType}`);
-        console.log(`- Image Data Length: ${imageData.length} characters`);
-        // Enhanced multimodal prompt for textbook analysis
-        const analysisPrompt = `
-ANALYZE THIS TEXTBOOK PAGE - COMPREHENSIVE EDUCATIONAL CONTENT ANALYSIS
 
-You are analyzing an uploaded textbook page image. Provide a detailed analysis of the educational content for generating differentiated worksheets.
+// --- WEEKLY PLANNER V2: GENERATE PLAN ---
+app.post('/api/generate-weekly-plan', asyncHandler(async (req, res) => {
+    const { analyzedContent, targetGrades, numberOfWeeks = 1 } = req.body;
+    if (!analyzedContent || !targetGrades || !numberOfWeeks) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Missing required fields: analyzedContent, targetGrades, numberOfWeeks' 
+        });
+    }
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const prompt = `
+    You are Sahayak, an expert AI teaching assistant for Indian classrooms.
+    Based on the following analyzed text and student grades, generate a detailed weekly learning plan.
+    
+    Topic: ${analyzedContent.topic}
+    Key Terms: ${analyzedContent.keyTerms.join(', ')}
+    Concepts: ${analyzedContent.concepts.join(', ')}
+    Target Grades: ${targetGrades.join(', ')}
+    Number of Weeks: ${numberOfWeeks}
 
-ANALYSIS REQUIREMENTS:
-1. Identify the main topic and educational concepts
-2. Extract key terms and vocabulary
-3. Determine appropriate grade levels (1-10)
-4. Assess content difficulty and complexity
-5. Describe what's visible in the image
-
-RESPONSE FORMAT (JSON):
-{
-  "topic": "Clear, specific topic title",
-  "imageDescription": "Detailed description of what's visible in the image",
-  "keyTerms": ["term1", "term2", "term3", "term4", "term5"],
-  "concepts": ["concept1", "concept2", "concept3", "concept4"],
-  "difficulty": "beginner|intermediate|advanced",
-  "suggestedGrades": ["Grade 3", "Grade 4", "Grade 5"],
-  "contentType": "text|diagram|both|chart|illustration",
-  "subject": "Science|Mathematics|English|Social Studies|General"
-}
-
-IMPORTANT GUIDELINES:
-- Use Indian educational context and terminology
-- Suggest 3-5 appropriate grade levels
-- Include cultural relevance where applicable
-- Be specific about concepts and terms
-- Provide actionable educational insights
-
-Generate EXACTLY this JSON structure - no additional text or explanation.
-`;
-        // Call Gemini with image analysis
-        const result = await model.generateContent([
-            { text: analysisPrompt },
-            {
-                inlineData: {
-                    mimeType: fileType,
-                    data: imageData
+    Generate a weekly lesson plan with the following structure for each week:
+    {
+      "weeklyPlans": [
+        {
+          "week": number,
+          "theme": string,
+          "overview": string,
+          "learningObjectives": string[],
+          "dailyPlans": {
+            "monday": {
+              "day": "Monday",
+              "title": string,
+              "duration": string,
+              "activities": [
+                {
+                  "time": string,
+                  "activity": string,
+                  "description": string,
+                  "materials": string[],
+                  "gradeAdaptation": string
                 }
-            }
-        ]);
-        const response = await result.response;
-        const analysisText = response.text();
-        console.log('\n🤖 Gemini Analysis Response:');
-        console.log(`- Response Length: ${analysisText.length} characters`);
-        console.log(`- Analysis Preview: ${analysisText.substring(0, 200)}...`);
-        // Parse the JSON response
-        let analysisData;
+              ]
+            },
+            // Similar structure for tuesday through friday
+          },
+          "resources": {
+            "materials": string[],
+            "culturalConnections": string[],
+            "assessmentTools": string[]
+          },
+          "homework": string[],
+          "adaptations": {
+            "lowerGrades": string,
+            "higherGrades": string,
+            "mixedGrade": string
+          }
+        }
+      ]
+    }
+
+    CRITICAL: Respond with ONLY the JSON object, no markdown formatting or explanation.
+    `;
+    
+    try {
+        const response = await model.generateContent(prompt);
+        const text = response.response.text();
+        
         try {
-            // Clean and parse JSON response
-            const cleanedResponse = analysisText.trim()
-                .replace(/```json\n?/g, '')
-                .replace(/```\n?/g, '')
-                .replace(/^[^{]*{/, '{')
-                .replace(/}[^}]*$/, '}');
-            analysisData = JSON.parse(cleanedResponse);
-            console.log('✅ Analysis Parsing: SUCCESS');
-            console.log('📊 Extracted Data:');
-            console.log(`- Topic: ${analysisData.topic}`);
-            console.log(`- Concepts: ${analysisData.concepts?.length || 0} items`);
-            console.log(`- Key Terms: ${analysisData.keyTerms?.length || 0} items`);
-            console.log(`- Suggested Grades: ${analysisData.suggestedGrades?.join(', ') || 'None'}`);
+            // Clean the response text by removing any markdown code block syntax
+            const cleanText = text.replace(/```json\n|\n```|```/g, '').trim();
+            const parsedPlan = JSON.parse(cleanText);
+            
+            // Ensure the response has the expected structure
+            const weeklyPlans = parsedPlan.weeklyPlans || [parsedPlan];
+            
+            res.json({
+                success: true,
+                data: {
+                    weeklyPlans,
+                    totalWeeks: numberOfWeeks,
+                    targetGrades
+                },
+                metadata: {
+                    timestamp: new Date().toISOString()
+                }
+            });
+        } catch (e) {
+            console.error("Error parsing weekly plan JSON:", e);
+            console.error("Raw response was:", text);
+            res.status(500).json({ 
+                success: false, 
+                error: "Failed to parse weekly plan from AI response." 
+            });
+        }
+    } catch (error) {
+        console.error("Error generating weekly plan:", error);
+        res.status(500).json({ 
+            success: false, 
+            error: "Failed to generate weekly plan." 
+        });
+    }
+}));
+// --- LOCALIZED CONTENT: GENERATE STORY/POEM ---
+app.post('/api/generate-content', asyncHandler(async (req, res) => {
+    const { description, language, grade, subject, location } = req.body;
+    if (!description || !language || !grade) {
+        return res.status(400).json({ error: 'Missing required fields: description, language, grade' });
+    }
+    try {
+        const prompt = `
+      You are Sahayak, an expert AI teaching assistant for Indian classrooms.
+      Generate culturally relevant educational content based on the following:
+      Description: ${description}
+      Language: ${language}
+      Grade: ${grade}
+      Subject: ${subject || 'general'}
+      Location: ${location || 'India'}
+      
+      Create a story or educational content that is appropriate for Grade ${grade} students.
+      Ensure it includes Indian cultural elements and is written in ${language}.
+      
+      Respond with ONLY a JSON object in this format:
+      {
+        "success": true,
+        "data": {
+          "title": "Content Title",
+          "content": "The main content text",
+          "moral": "Key learning or moral (if applicable)"
+        }
+      }
+    `;
+        const response = await model.generateContent(prompt);
+        let text = response.response.text();
+        // Clean up markdown formatting if present
+        text = text.replace(/```json\s*/, '').replace(/```\s*$/, '').trim();
+        try {
+            const content = JSON.parse(text);
+            res.json(content);
+        }
+        catch (e) {
+            console.error("Error parsing content JSON:", e);
+            console.error("Raw response was:", text);
+            res.status(500).json({ error: 'Failed to parse content response' });
+        }
+    }
+    catch (error) {
+        console.error("Error generating content:", error);
+        res.status(500).json({ error: 'Failed to generate content.' });
+    }
+}));
+// --- QUICK QUIZ: GENERATE QUESTIONS ---
+app.post('/api/generate-questions', asyncHandler(async (req, res) => {
+    const { topic, grade, numQuestions, questionTypes, bloomLevels, language } = req.body;
+    if (!topic || !grade || !numQuestions) {
+        return res.status(400).json({ error: 'Missing required fields: topic, grade, numQuestions' });
+    }
+    try {
+        const prompt = `
+      You are Sahayak, an expert AI teaching assistant for Indian classrooms.
+      Generate ${numQuestions} questions for Grade ${grade} students on the topic: ${topic}.
+      Question types: ${questionTypes?.join(', ') || 'mixed'}
+      Bloom's levels: ${bloomLevels?.join(', ') || 'mixed'}
+      Language: ${language || 'English'}
+      
+      Respond with ONLY a JSON object containing the questions array.
+    `;
+        const response = await model.generateContent(prompt);
+        let text = response.response.text();
+        // Clean up markdown formatting if present
+        text = text.replace(/```json\s*/, '').replace(/```\s*$/, '').trim();
+        try {
+            const questions = JSON.parse(text);
+            res.json(questions);
+        }
+        catch (e) {
+            console.error("Error parsing questions JSON:", e);
+            console.error("Raw response was:", text);
+            res.status(500).json({ error: "Failed to parse questions from AI response" });
+        }
+    }
+    catch (error) {
+        console.error("Error generating questions:", error);
+        res.status(500).json({ error: 'Failed to generate questions.' });
+    }
+}));
+// --- KNOWLEDGE BASE: ASK QUESTION ---
+app.post('/api/ask-question', asyncHandler(async (req, res) => {
+    const { question, grade, language } = req.body;
+    if (!question || !grade || !language) {
+        return res.status(400).json({ error: 'Missing required fields: question, grade, language' });
+    }
+    try {
+        const prompt = `
+      You are Sahayak, an expert AI teaching assistant for Indian classrooms.
+      Answer the following question for Grade ${grade} students in ${language}:
+      Question: ${question}
+      
+      Provide a comprehensive answer with explanations, examples, and teaching tips.
+      CRITICAL: Respond with ONLY a JSON object containing the answer.
+    `;
+        const response = await model.generateContent(prompt);
+        let text = response.response.text();
+        // Clean up markdown formatting if present
+        text = text.replace(/```json\s*/, '').replace(/```\s*$/, '').trim();
+        try {
+            const answer = JSON.parse(text);
+            res.json(answer);
+        }
+        catch (e) {
+            console.error("Error parsing answer JSON:", e);
+            console.error("Raw response was:", text);
+            res.status(500).json({ error: "Failed to parse response from AI" });
+        }
+    }
+    catch (error) {
+        console.error("Error answering question:", error);
+        res.status(500).json({ error: 'Failed to answer question.' });
+    }
+}));
+// --- SMART WORKSHEETS V1: ANALYZE TEXTBOOK ---
+app.post('/api/analyze-textbook', upload.single('file'), asyncHandler(async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: "File not provided" });
+    }
+    // Validate file type - only accept images
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(req.file.mimetype)) {
+        return res.status(400).json({
+            error: "Invalid file type. Please upload an image file (JPEG, PNG, GIF, or WebP).",
+            allowedTypes: allowedTypes
+        });
+    }
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (req.file.size > maxSize) {
+        return res.status(400).json({
+            error: "File too large. Maximum size is 10MB.",
+            maxSize: maxSize
+        });
+    }
+    try {
+        console.log(`📸 Processing textbook image: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
+        const base64Data = req.file.buffer.toString('base64');
+        const prompt = `You are Sahayak, an expert AI teaching assistant for Indian classrooms.
+
+Analyze this textbook page image and extract educational content for creating differentiated worksheets.
+
+Provide a detailed analysis including:
+- topic: Main topic/subject covered (string)
+- keyTerms: Important vocabulary and terms (array of strings)
+- concepts: Key concepts and ideas (array of strings)  
+- difficulty: Difficulty level (easy/medium/hard)
+- suggestedGrades: Appropriate grade levels (array like ["Grade 3", "Grade 4", "Grade 5"])
+- imageDescription: Brief description of what's shown in the image
+- learningObjectives: What students should learn (array of strings)
+- culturalContext: Indian cultural relevance and examples
+
+CRITICAL: Respond with ONLY valid JSON in this exact format:
+{
+  "topic": "Main topic here",
+  "keyTerms": ["term1", "term2", "term3"],
+  "concepts": ["concept1", "concept2"],
+  "difficulty": "medium",
+  "suggestedGrades": ["Grade 3", "Grade 4", "Grade 5"],
+  "imageDescription": "Description of the textbook page",
+  "learningObjectives": ["objective1", "objective2"],
+  "culturalContext": "Indian context and examples"
+}`;
+        const imagePart = {
+            inlineData: {
+                data: base64Data,
+                mimeType: req.file.mimetype
+            }
+        };
+        console.log(`🤖 Sending image to Gemini for analysis...`);
+        const result = await model.generateContent([prompt, imagePart]);
+        let text = result.response.text();
+        console.log(`📝 Raw Gemini response: ${text.substring(0, 200)}...`);
+        // Clean up markdown formatting if present
+        text = text.replace(/```json\s*/, '').replace(/```\s*$/, '').trim();
+        try {
+            const analysis = JSON.parse(text);
+            console.log(`✅ Successfully analyzed textbook image: ${analysis.topic}`);
+            res.json({ success: true, data: analysis });
         }
         catch (parseError) {
-            console.log('❌ Analysis Parsing: FAILED');
-            console.log('📝 Raw Response:', analysisText);
-            // Fallback analysis
-            analysisData = {
-                topic: "Educational Content Analysis",
-                imageDescription: "Textbook page uploaded for analysis",
-                keyTerms: ["learning", "education", "knowledge", "study", "concept"],
-                concepts: ["Basic understanding", "Key learning points", "Educational content", "Study material"],
-                difficulty: "intermediate",
+            console.error("Failed to parse analysis from AI response", parseError);
+            console.error("Raw response was:", text);
+            // Fallback response if parsing fails
+            const fallbackAnalysis = {
+                topic: "Educational Content",
+                keyTerms: ["vocabulary", "concepts", "learning"],
+                concepts: ["Basic understanding", "Educational content"],
+                difficulty: "medium",
                 suggestedGrades: ["Grade 3", "Grade 4", "Grade 5"],
-                contentType: "text",
-                subject: "General"
+                imageDescription: "Textbook page with educational content",
+                learningObjectives: ["Understanding basic concepts"],
+                culturalContext: "Indian educational context"
             };
+            res.json({ success: true, data: fallbackAnalysis });
         }
-        const processingTime = Date.now() - startTime;
-        console.log(`\n⏱️ Analysis completed in ${processingTime}ms`);
-        res.json({
-            success: true,
-            data: analysisData,
-            metadata: {
-                processingTime,
-                timestamp: new Date().toISOString()
-            }
-        });
     }
     catch (error) {
-        console.error('❌ Textbook Analysis Error:', error);
+        console.error("Error analyzing textbook:", error);
         res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Analysis failed'
+            error: "Failed to analyze textbook image. Please try again with a clear image of a textbook page.",
+            details: error instanceof Error ? error.message : String(error)
         });
     }
-});
-// Smart Worksheets - Generate Differentiated Worksheets
+}));
+// Generate worksheets endpoint
 app.post('/api/generate-worksheets', async (req, res) => {
-    const startTime = Date.now();
-    console.log('\n📝 === WORKSHEET GENERATION REQUEST ===');
     try {
-        const { analyzedContent, targetGrades, questionTypes = ['mixed'], imageData } = req.body;
-        if (!analyzedContent || !targetGrades || targetGrades.length === 0) {
-            res.status(400).json({
+        console.log('📝 Starting worksheet generation...');
+        const { analysis, selectedGrades, questionTypes } = req.body;
+
+        if (!analysis || !selectedGrades || selectedGrades.length === 0) {
+            return res.status(400).json({ 
                 success: false,
-                error: 'Missing required data for worksheet generation'
+                error: 'Missing required fields: analysis, selectedGrades' 
             });
-            return;
         }
-        console.log('📊 Worksheet Generation Details:');
-        console.log(`- Topic: ${analyzedContent.topic}`);
-        console.log(`- Target Grades: ${targetGrades.join(', ')}`);
-        console.log(`- Question Types: ${questionTypes.join(', ')}`);
-        console.log(`- Key Terms: ${analyzedContent.keyTerms?.length || 0} items`);
-        console.log(`- Concepts: ${analyzedContent.concepts?.length || 0} items`);
-        // Generate worksheets for each target grade
-        const worksheets = [];
-        for (const grade of targetGrades) {
-            const gradeNumber = parseInt(grade.replace('Grade ', ''));
-            // Determine difficulty and complexity based on grade
-            let difficulty, complexity, exerciseCount;
-            if (gradeNumber <= 2) {
-                difficulty = 'easy';
-                complexity = 'simple';
-                exerciseCount = 6;
-            }
-            else if (gradeNumber <= 5) {
-                difficulty = 'medium';
-                complexity = 'intermediate';
-                exerciseCount = 8;
-            }
-            else {
-                difficulty = 'hard';
-                complexity = 'advanced';
-                exerciseCount = 10;
-            }
-            // Generate question type instructions based on preferences
-            const getQuestionTypeInstructions = () => {
-                if (questionTypes.includes('mixed')) {
-                    return `
-EXERCISE TYPES TO INCLUDE (Mixed Variety):
-- Multiple Choice (with 4 options) - 30%
-- Fill in the Blank - 25%
-- Short Answer - 20%
-- True/False - 15%
-- Matching (when appropriate) - 10%
-          `;
-                }
-                const typeMap = {
-                    'mcq': 'Multiple Choice (with 4 options)',
-                    'shortAnswer': 'Short Answer questions',
-                    'fillInBlank': 'Fill in the Blank',
-                    'truefalse': 'True/False questions',
-                    'matching': 'Matching exercises'
-                };
-                const selectedTypeDescriptions = questionTypes
-                    .filter((type) => type !== 'mixed')
-                    .map((type) => `- ${typeMap[type] || type}`)
-                    .join('\n');
-                return `
-EXERCISE TYPES TO INCLUDE (Selected Types Only):
-${selectedTypeDescriptions}
 
-DISTRIBUTION: Create exercises using ONLY the selected question types above.
-        `;
-            };
-            const worksheetPrompt = `
-CREATE DIFFERENTIATED WORKSHEET FOR ${grade.toUpperCase()}
+        console.log('📊 Generation request:', {
+            topic: analysis.topic,
+            grades: selectedGrades.join(', '),
+            questionTypes: questionTypes?.join(', ') || 'mixed'
+        });
 
-CONTENT ANALYSIS:
-- Topic: ${analyzedContent.topic}
-- Key Terms: ${analyzedContent.keyTerms?.join(', ')}
-- Concepts: ${analyzedContent.concepts?.join(', ')}
-- Difficulty Level: ${difficulty}
-- Complexity: ${complexity}
+        const prompt = `You are Sahayak, an expert AI teaching assistant for Indian classrooms.
 
-WORKSHEET REQUIREMENTS:
-- Target Grade: ${grade}
-- Number of Exercises: ${exerciseCount}
-- Difficulty: ${difficulty}
-- Question Type Preference: ${questionTypes.join(', ')}
-- Use Indian cultural context and examples
-- Make it engaging and educational
+Generate differentiated worksheets based on this analyzed content:
+${JSON.stringify(analysis, null, 2)}
 
-RESPONSE FORMAT (JSON):
+For these grade levels: ${selectedGrades.join(', ')}
+Question types requested: ${questionTypes?.join(', ') || 'mixed'}
+
+CRITICAL: Generate worksheets with questions, activities, and exercises appropriate for each grade level.
+Each worksheet must include:
+- Grade-appropriate language and complexity
+- Clear instructions
+- Mix of question types (multiple choice, fill in blanks, short answer)
+- Cultural context and examples from India
+- Learning objectives
+- Answer key
+
+RESPOND WITH ONLY VALID JSON IN THIS EXACT FORMAT:
 {
-  "grade": "${grade}",
-  "title": "Specific worksheet title related to ${analyzedContent.topic}",
-  "difficulty": "${difficulty}",
-  "instructions": "Clear, encouraging instructions for ${grade} students",
-  "exercises": [
+  "worksheets": [
     {
-      "id": "ex1",
-      "type": "multipleChoice|fillInBlank|shortAnswer|matching|truefalse",
-      "question": "Clear, grade-appropriate question with Indian context",
-      "options": ["option1", "option2", "option3", "option4"],
-      "correctAnswer": "correct answer",
-      "points": 2,
-      "hint": "Optional helpful hint"
+      "grade": "Grade X",
+      "title": "Worksheet title based on topic",
+      "difficulty": "easy|medium|hard",
+      "instructions": "Clear instructions for students",
+      "exercises": [
+        {
+          "id": "q1",
+          "type": "multipleChoice|fillInBlank|shortAnswer",
+          "question": "Question text",
+          "options": ["A", "B", "C", "D"],
+          "correctAnswer": "Correct answer",
+          "points": 5,
+          "hint": "Optional hint"
+        }
+      ]
     }
   ]
-}
+}`;
 
-${getQuestionTypeInstructions()}
-
-QUESTION GUIDELINES BY TYPE:
-- Multiple Choice: 4 options, 1 clearly correct, others plausible but wrong
-- Fill in the Blank: Use underscores (___) for blanks, provide exact answer
-- Short Answer: Open-ended, 1-3 sentence expected responses
-- True/False: Clear statements that are definitely true or false
-- Matching: Pairs of related items (terms-definitions, cause-effect)
-
-CULTURAL INTEGRATION:
-- Use Indian names: Arjun, Priya, Ravi, Meera, Kiran, Anjali
-- Reference Indian places: Delhi, Mumbai, Chennai, Kolkata, Bangalore
-- Include festivals: Diwali, Holi, Ganesh Chaturthi, Durga Puja
-- Use familiar foods: rice, dal, roti, curry, samosa
-- Reference local animals: elephant, tiger, peacock, cobra
-
-IMPORTANT GUIDELINES:
-- Grade-appropriate vocabulary and complexity for ${grade}
-- Clear, unambiguous questions
-- Culturally relevant examples and contexts
-- Proper point values (1-3 points based on difficulty)
-- Helpful hints for challenging questions
-- Educational value aligned with ${analyzedContent.topic}
-
-Generate EXACTLY this JSON structure with ${exerciseCount} exercises using the specified question types.
-`;
-            try {
-                console.log(`\n📝 Generating worksheet for ${grade}...`);
-                const result = await model.generateContent([
-                    { text: worksheetPrompt },
-                    ...(imageData ? [{
-                            inlineData: {
-                                mimeType: 'image/jpeg',
-                                data: imageData
-                            }
-                        }] : [])
-                ]);
-                const response = await result.response;
-                const worksheetText = response.text();
-                console.log(`- ${grade} Response Length: ${worksheetText.length} characters`);
-                // Parse worksheet JSON
-                let worksheetData;
-                try {
-                    const cleanedResponse = worksheetText.trim()
-                        .replace(/```json\n?/g, '')
-                        .replace(/```\n?/g, '')
-                        .replace(/^[^{]*{/, '{')
-                        .replace(/}[^}]*$/, '}');
-                    worksheetData = JSON.parse(cleanedResponse);
-                    // Validate and ensure proper structure
-                    if (!worksheetData.exercises || !Array.isArray(worksheetData.exercises)) {
-                        throw new Error('Invalid exercises structure');
-                    }
-                    // Ensure each exercise has required fields
-                    worksheetData.exercises = worksheetData.exercises.map((exercise, index) => ({
-                        id: exercise.id || `ex${index + 1}`,
-                        type: exercise.type || 'shortAnswer',
-                        question: exercise.question || `Question ${index + 1}`,
-                        options: exercise.options || [],
-                        correctAnswer: exercise.correctAnswer || 'Sample answer',
-                        points: exercise.points || 2,
-                        hint: exercise.hint || ''
-                    }));
-                    console.log(`✅ ${grade} Worksheet: SUCCESS - ${worksheetData.exercises.length} exercises`);
-                }
-                catch (parseError) {
-                    console.log(`❌ ${grade} Worksheet Parsing: FAILED`);
-                    console.log('📝 Raw Response:', worksheetText.substring(0, 200));
-                    // Fallback worksheet
-                    worksheetData = {
-                        grade: grade,
-                        title: `${analyzedContent.topic} - ${grade} Worksheet`,
-                        difficulty: difficulty,
-                        instructions: "Read each question carefully and provide your best answer.",
-                        exercises: Array.from({ length: exerciseCount }, (_, i) => ({
-                            id: `ex${i + 1}`,
-                            type: i % 2 === 0 ? 'multipleChoice' : 'shortAnswer',
-                            question: `Question ${i + 1}: Based on the textbook content, what is an important concept to understand?`,
-                            options: i % 2 === 0 ? ['Option A', 'Option B', 'Option C', 'Option D'] : [],
-                            correctAnswer: i % 2 === 0 ? 'Option A' : 'Sample answer explaining key concept',
-                            points: 2,
-                            hint: 'Think about the main ideas from the textbook page'
-                        }))
-                    };
-                }
-                worksheets.push(worksheetData);
-            }
-            catch (error) {
-                console.error(`❌ Error generating worksheet for ${grade}:`, error);
-                // Add fallback worksheet
-                worksheets.push({
-                    grade: grade,
-                    title: `${analyzedContent.topic} - ${grade} Worksheet`,
-                    difficulty: difficulty,
-                    instructions: "Complete these exercises based on the textbook content.",
-                    exercises: Array.from({ length: exerciseCount }, (_, i) => ({
-                        id: `ex${i + 1}`,
-                        type: 'shortAnswer',
-                        question: `Question ${i + 1}: Explain an important concept from the textbook.`,
-                        options: [],
-                        correctAnswer: 'Detailed explanation of key concept',
-                        points: 2,
-                        hint: 'Review the main ideas from the textbook page'
-                    }))
-                });
-            }
-        }
-        const processingTime = Date.now() - startTime;
-        console.log(`\n⏱️ Worksheet generation completed in ${processingTime}ms`);
-        console.log(`📊 Generated ${worksheets.length} worksheets successfully`);
-        res.json({
-            success: true,
-            data: {
-                worksheets,
-                totalGenerated: worksheets.length,
-                targetGrades: targetGrades
-            },
-            metadata: {
-                processingTime,
-                timestamp: new Date().toISOString()
-            }
-        });
-    }
-    catch (error) {
-        console.error('❌ Worksheet Generation Error:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Worksheet generation failed'
-        });
-    }
-});
-// File Processing - Enhanced text extraction with Gemini File API
-app.post('/api/process-file', upload.single('file'), async (req, res) => {
-    try {
-        console.log('🚀 Processing file for text extraction');
-        const startTime = Date.now();
-        if (!req.file) {
-            res.status(400).json({
-                success: false,
-                error: 'No file uploaded'
-            });
-            return;
-        }
-        const filePath = req.file.path;
-        const fileName = req.file.originalname;
-        const fileExtension = path.extname(fileName).toLowerCase();
-        console.log(`📄 Processing file: ${fileName} (${fileExtension})`);
-        let extractedText = '';
-        // Use Gemini to extract text from the uploaded file
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
+        
+        let worksheets;
         try {
-            const fileContent = fs.readFileSync(filePath);
-            const fileBase64 = fileContent.toString('base64');
-            const prompt = `Extract all text content from this ${fileExtension} file. 
-      Please provide a clean, readable text extraction without any formatting artifacts.
-      Focus on the main content and ignore headers, footers, and page numbers.
-      
-      CRITICAL: You MUST respond with ONLY the extracted text content. Do not include:
-      - "Here is the extracted text..."
-      - "The content is..."
-      - Any explanatory text
-      - Just the pure text content from the document
-      
-      If the file cannot be read or contains no text, respond with: "Unable to extract text from this file."`;
-            const result = await model.generateContent([
-                { text: prompt },
-                {
-                    inlineData: {
-                        mimeType: fileExtension === '.pdf' ? 'application/pdf' :
-                            fileExtension === '.docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
-                                'application/msword',
-                        data: fileBase64
-                    }
-                }
-            ]);
-            extractedText = result.response.text().trim();
-            // Clean up response if it contains explanatory text
-            if (extractedText.toLowerCase().includes('here is the extracted text') ||
-                extractedText.toLowerCase().includes('the content is')) {
-                const lines = extractedText.split('\n');
-                extractedText = lines.slice(1).join('\n').trim();
-            }
-            console.log(`✅ Successfully extracted ${extractedText.length} characters from ${fileName}`);
+            const cleanText = text.trim().replace(/```json|```/g, '');
+            worksheets = JSON.parse(cleanText);
+        } catch (parseError) {
+            console.error('❌ Failed to parse worksheets:', parseError);
+            throw new Error('Failed to parse worksheets from AI response');
         }
-        catch (aiError) {
-            console.log(`⚠️ AI extraction failed, using fallback for ${fileName}:`, aiError);
-            // Fallback: Generate sample text based on file name
-            extractedText = `Sample text content for ${fileName}. 
-      
-      This is placeholder content since the file processing is still being enhanced. 
-      Please copy and paste your content directly into the text area below for now.
-      
-      We are working on implementing full PDF and Word document text extraction capabilities.
-      
-      For the best experience, please manually copy your content from the document and paste it in the text area.`;
+
+        // Validate the response format
+        if (!worksheets.worksheets || !Array.isArray(worksheets.worksheets)) {
+            throw new Error('Invalid worksheet format from AI');
         }
-        // Clean up: delete uploaded file from local storage
-        fs.unlink(filePath, (err) => {
-            if (err)
-                console.log('Warning: Could not delete temporary file:', err);
-        });
-        const duration = Date.now() - startTime;
-        console.log(`✅ File processed in ${duration}ms`);
+
         res.json({
             success: true,
-            data: {
-                extractedText,
-                fileName,
-                fileSize: req.file.size,
-                charactersExtracted: extractedText.length
-            },
-            duration: `${duration}ms`,
-            aiProcessed: true
+            data: worksheets.worksheets
         });
-    }
-    catch (error) {
-        console.error('❌ File processing error:', error);
-        // Clean up file if it exists
-        if (req.file) {
-            fs.unlink(req.file.path, (err) => {
-                if (err)
-                    console.log('Warning: Could not delete temporary file:', err);
-            });
-        }
+
+    } catch (error) {
+        console.error('❌ Worksheet generation error:', error);
         res.status(500).json({
             success: false,
-            error: error instanceof Error ? error.message : 'File processing failed'
+            error: error instanceof Error ? error.message : 'Failed to generate worksheets'
         });
     }
 });
-// Weekly Lesson Plan Generation API
-app.post('/api/generate-weekly-plan', async (req, res) => {
+// --- VISUAL AIDS: GENERATE ---
+app.post('/api/generate-visual-aid', asyncHandler(async (req, res) => {
+    const { topic, grade, description } = req.body;
+    if (!topic && !description) {
+        return res.status(400).json({ error: 'Missing required fields: topic or description' });
+    }
     try {
-        console.log('📅 === WEEKLY LESSON PLAN GENERATION REQUEST ===');
-        const startTime = Date.now();
-        const { analyzedContent, targetGrades, numberOfWeeks = 1 } = req.body;
-        console.log('📊 Weekly Plan Generation Details:');
-        console.log(`- Topic: ${analyzedContent.topic}`);
-        console.log(`- Target Grades: ${targetGrades.join(', ')}`);
-        console.log(`- Number of Weeks: ${numberOfWeeks}`);
-        console.log(`- Key Terms: ${analyzedContent.keyTerms.length} items`);
-        console.log(`- Concepts: ${analyzedContent.concepts.length} items`);
-        const weeklyPlans = [];
-        for (let week = 1; week <= numberOfWeeks; week++) {
-            console.log(`\n📝 Generating plan for Week ${week}...`);
-            const prompt = `You are Sahayak, an expert AI teaching assistant for Indian multi-grade classrooms.
-
-Create a detailed weekly lesson plan for Week ${week} based on this textbook analysis:
-
-TEXTBOOK ANALYSIS:
-- Topic: ${analyzedContent.topic}
-- Key Concepts: ${analyzedContent.concepts.join(', ')}
-- Key Terms: ${analyzedContent.keyTerms.join(', ')}
-- Target Grades: ${targetGrades.join(', ')}
-
-CRITICAL: You MUST respond with ONLY valid JSON in this EXACT format:
-
-{
-  "week": ${week},
-  "theme": "Week ${week} theme based on ${analyzedContent.topic}",
-  "overview": "Brief overview of what students will learn this week",
-  "learningObjectives": [
-    "Students will understand...",
-    "Students will be able to...",
-    "Students will analyze..."
-  ],
-  "dailyPlans": {
-    "monday": {
-      "day": "Monday",
-      "title": "Introduction to the Topic",
-      "duration": "45 minutes",
-      "activities": [
-        {
-          "time": "0-10 min",
-          "activity": "Warm-up and Review",
-          "description": "Quick review of previous knowledge",
-          "materials": ["Blackboard", "Chalk"],
-          "gradeAdaptation": "Simpler questions for younger grades"
-        },
-        {
-          "time": "10-25 min",
-          "activity": "Main Lesson",
-          "description": "Introduce key concepts using Indian cultural examples",
-          "materials": ["Textbook", "Local examples"],
-          "gradeAdaptation": "Different complexity levels for different grades"
-        },
-        {
-          "time": "25-40 min",
-          "activity": "Practice Activity",
-          "description": "Hands-on activity to reinforce learning",
-          "materials": ["Worksheets", "Group work"],
-          "gradeAdaptation": "Varied difficulty levels"
-        },
-        {
-          "time": "40-45 min",
-          "activity": "Wrap-up",
-          "description": "Summary and preview of next day",
-          "materials": ["Discussion"],
-          "gradeAdaptation": "Age-appropriate questioning"
+        const prompt = `
+      You are Sahayak, an expert AI teaching assistant for Indian classrooms.
+      Generate a visual aid for the topic: ${topic || description}
+      Grade level: ${grade || 'general'}
+      
+      Create a simple visual aid that can be drawn on a blackboard, including:
+      - SVG drawing instructions
+      - Step-by-step drawing guide
+      - Materials needed
+      - Teaching tips
+      
+      Respond with ONLY a JSON object containing the visual aid details.
+    `;
+        const response = await model.generateContent(prompt);
+        let text = response.response.text();
+        // Clean up markdown formatting if present
+        text = text.replace(/```json\s*/, '').replace(/```\s*$/, '').trim();
+        try {
+            const visualAid = JSON.parse(text);
+            res.json(visualAid);
         }
-      ]
-    },
-    "tuesday": {
-      "day": "Tuesday",
-      "title": "Exploring Key Concepts",
-      "duration": "45 minutes",
-      "activities": [
-        {
-          "time": "0-10 min",
-          "activity": "Review and Connect",
-          "description": "Connect to Monday's lesson",
-          "materials": ["Blackboard", "Previous notes"],
-          "gradeAdaptation": "Visual aids for younger students"
-        },
-        {
-          "time": "10-30 min",
-          "activity": "Deep Dive",
-          "description": "Explore concepts in detail with Indian examples",
-          "materials": ["Local materials", "Stories"],
-          "gradeAdaptation": "More complex analysis for older grades"
-        },
-        {
-          "time": "30-40 min",
-          "activity": "Interactive Exercise",
-          "description": "Students work in mixed-grade groups",
-          "materials": ["Group activity materials"],
-          "gradeAdaptation": "Peer teaching opportunities"
-        },
-        {
-          "time": "40-45 min",
-          "activity": "Assessment",
-          "description": "Quick formative assessment",
-          "materials": ["Oral questions", "Quick write"],
-          "gradeAdaptation": "Different assessment methods"
+        catch (e) {
+            console.error("Error parsing visual aid JSON:", e);
+            console.error("Raw response was:", text);
+            res.status(500).json({ error: "Failed to parse visual aid from AI response" });
         }
-      ]
-    },
-    "wednesday": {
-      "day": "Wednesday",
-      "title": "Practical Applications",
-      "duration": "45 minutes",
-      "activities": [
-        {
-          "time": "0-10 min",
-          "activity": "Energizer",
-          "description": "Fun activity to start the day",
-          "materials": ["Simple games", "Movement"],
-          "gradeAdaptation": "Age-appropriate games"
-        },
-        {
-          "time": "10-35 min",
-          "activity": "Real-World Connections",
-          "description": "Connect learning to Indian daily life and culture",
-          "materials": ["Local examples", "Community connections"],
-          "gradeAdaptation": "Different complexity of connections"
-        },
-        {
-          "time": "35-45 min",
-          "activity": "Project Planning",
-          "description": "Plan weekend project or homework",
-          "materials": ["Project guidelines"],
-          "gradeAdaptation": "Differentiated project requirements"
-        }
-      ]
-    },
-    "thursday": {
-      "day": "Thursday",
-      "title": "Creative Expression",
-      "duration": "45 minutes",
-      "activities": [
-        {
-          "time": "0-10 min",
-          "activity": "Sharing Circle",
-          "description": "Students share insights or questions",
-          "materials": ["Circle seating"],
-          "gradeAdaptation": "Guided sharing for younger students"
-        },
-        {
-          "time": "10-35 min",
-          "activity": "Creative Project",
-          "description": "Art, drama, or storytelling related to the topic",
-          "materials": ["Art supplies", "Props"],
-          "gradeAdaptation": "Different creative mediums"
-        },
-        {
-          "time": "35-45 min",
-          "activity": "Presentation Prep",
-          "description": "Prepare for Friday presentations",
-          "materials": ["Presentation materials"],
-          "gradeAdaptation": "Varied presentation formats"
-        }
-      ]
-    },
-    "friday": {
-      "day": "Friday",
-      "title": "Review and Assessment",
-      "duration": "45 minutes",
-      "activities": [
-        {
-          "time": "0-20 min",
-          "activity": "Student Presentations",
-          "description": "Students present their work",
-          "materials": ["Presentation space"],
-          "gradeAdaptation": "Different presentation lengths"
-        },
-        {
-          "time": "20-35 min",
-          "activity": "Week Review",
-          "description": "Comprehensive review of week's learning",
-          "materials": ["Review materials", "Games"],
-          "gradeAdaptation": "Different review methods"
-        },
-        {
-          "time": "35-45 min",
-          "activity": "Assessment and Preview",
-          "description": "Assess understanding and preview next week",
-          "materials": ["Assessment tools"],
-          "gradeAdaptation": "Multiple assessment formats"
-        }
-      ]
-    }
-  },
-  "resources": {
-    "materials": ["Commonly available materials in Indian schools"],
-    "culturalConnections": ["Local festivals", "Community examples", "Regional traditions"],
-    "assessmentTools": ["Formative assessment methods", "Peer assessment", "Self-reflection"]
-  },
-  "homework": [
-    "Monday: Simple observation task",
-    "Tuesday: Practice exercise",
-    "Wednesday: Community connection activity",
-    "Thursday: Creative preparation",
-    "Friday: Reflection and preview"
-  ],
-  "adaptations": {
-    "lowerGrades": "Specific adaptations for younger students",
-    "higherGrades": "Extensions and challenges for older students",
-    "mixedGrade": "Strategies for multi-grade teaching"
-  }
-}
-
-RULES:
-- Focus on practical, implementable daily activities
-- Use authentic Indian cultural context throughout
-- Include specific time allocations for each activity
-- Provide clear multi-grade adaptations
-- Ensure activities use locally available materials
-- Make it immediately usable by teachers in resource-limited schools`;
-            const result = await model.generateContent(prompt);
-            const response = result.response;
-            const text = response.text();
-            // Parse JSON response with better error handling
-            let parsedPlan;
-            try {
-                const cleanText = text.trim().replace(/```json|```/g, '');
-                parsedPlan = JSON.parse(cleanText);
-                console.log(`✅ Week ${week} Plan: SUCCESS - ${parsedPlan.dailyPlans ? Object.keys(parsedPlan.dailyPlans).length : 0} days`);
-            }
-            catch (parseError) {
-                console.log(`❌ Week ${week} JSON parsing failed, using structured fallback`);
-                parsedPlan = {
-                    week: week,
-                    theme: `Week ${week}: ${analyzedContent.topic}`,
-                    overview: `This week students will explore ${analyzedContent.topic} through various activities and cultural connections.`,
-                    learningObjectives: [
-                        `Students will understand the key concepts of ${analyzedContent.topic}`,
-                        `Students will be able to apply learning to real-world situations`,
-                        `Students will analyze the cultural significance of the topic`
-                    ],
-                    dailyPlans: {
-                        monday: {
-                            day: "Monday",
-                            title: "Introduction to the Topic",
-                            duration: "45 minutes",
-                            activities: [
-                                {
-                                    time: "0-10 min",
-                                    activity: "Warm-up and Review",
-                                    description: "Quick review and introduction",
-                                    materials: ["Blackboard", "Chalk"],
-                                    gradeAdaptation: "Simpler questions for younger grades"
-                                },
-                                {
-                                    time: "10-35 min",
-                                    activity: "Main Lesson",
-                                    description: `Introduce ${analyzedContent.topic} with Indian examples`,
-                                    materials: ["Textbook", "Local examples"],
-                                    gradeAdaptation: "Different complexity levels"
-                                },
-                                {
-                                    time: "35-45 min",
-                                    activity: "Wrap-up",
-                                    description: "Summary and preview",
-                                    materials: ["Discussion"],
-                                    gradeAdaptation: "Age-appropriate questioning"
-                                }
-                            ]
-                        },
-                        tuesday: {
-                            day: "Tuesday",
-                            title: "Exploring Key Concepts",
-                            duration: "45 minutes",
-                            activities: [
-                                {
-                                    time: "0-45 min",
-                                    activity: "Concept Exploration",
-                                    description: "Deep dive into key concepts",
-                                    materials: ["Various materials"],
-                                    gradeAdaptation: "Multi-level activities"
-                                }
-                            ]
-                        },
-                        wednesday: {
-                            day: "Wednesday",
-                            title: "Practical Applications",
-                            duration: "45 minutes",
-                            activities: [
-                                {
-                                    time: "0-45 min",
-                                    activity: "Real-world Connections",
-                                    description: "Connect to daily life",
-                                    materials: ["Local examples"],
-                                    gradeAdaptation: "Different complexity"
-                                }
-                            ]
-                        },
-                        thursday: {
-                            day: "Thursday",
-                            title: "Creative Expression",
-                            duration: "45 minutes",
-                            activities: [
-                                {
-                                    time: "0-45 min",
-                                    activity: "Creative Project",
-                                    description: "Express learning creatively",
-                                    materials: ["Art supplies"],
-                                    gradeAdaptation: "Different mediums"
-                                }
-                            ]
-                        },
-                        friday: {
-                            day: "Friday",
-                            title: "Review and Assessment",
-                            duration: "45 minutes",
-                            activities: [
-                                {
-                                    time: "0-45 min",
-                                    activity: "Review and Assess",
-                                    description: "Week review and assessment",
-                                    materials: ["Assessment tools"],
-                                    gradeAdaptation: "Multiple formats"
-                                }
-                            ]
-                        }
-                    },
-                    resources: {
-                        materials: ["Blackboard", "Chalk", "Textbook", "Local materials"],
-                        culturalConnections: ["Local festivals", "Community examples"],
-                        assessmentTools: ["Oral questions", "Observation", "Peer assessment"]
-                    },
-                    homework: [
-                        "Monday: Observation task",
-                        "Tuesday: Practice exercise",
-                        "Wednesday: Community activity",
-                        "Thursday: Creative work",
-                        "Friday: Reflection"
-                    ],
-                    adaptations: {
-                        lowerGrades: "Simpler activities and visual aids",
-                        higherGrades: "More complex analysis and projects",
-                        mixedGrade: "Peer teaching and group work"
-                    }
-                };
-            }
-            weeklyPlans.push(parsedPlan);
-        }
-        const processingTime = Date.now() - startTime;
-        console.log(`\n⏱️ Weekly plan generation completed in ${processingTime}ms`);
-        console.log(`📊 Generated ${weeklyPlans.length} weekly plans successfully`);
-        res.json({
-            success: true,
-            data: {
-                weeklyPlans,
-                totalWeeks: numberOfWeeks,
-                targetGrades: targetGrades
-            },
-            metadata: {
-                processingTime,
-                timestamp: new Date().toISOString()
-            }
-        });
     }
     catch (error) {
-        console.error('❌ Weekly Plan Generation Error:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Weekly plan generation failed'
-        });
+        console.error("Error generating visual aid:", error);
+        res.status(500).json({ error: 'Failed to generate visual aid.' });
     }
-});
-// Visual Aids Generation API (simplified)
-app.post('/api/generate-visual-aid', (req, res) => {
-    const { description, subject, gradeLevel, complexity } = req.body;
-    // Simple fallback visual aid
-    const visualAid = {
-        id: `visual-aid-${Date.now()}`,
-        title: `${description.split(' ').slice(0, 3).join(' ')}`,
-        description: description,
-        subject: subject,
-        complexity: complexity,
-        concepts: [
-            'Visual representation of concepts',
-            'Step-by-step understanding',
-            'Clear diagram interpretation'
-        ],
-        materials: ['White chalk', 'Colored chalk (optional)', 'Ruler', 'Eraser'],
-        instructions: [
-            'Start with the main concept and draw the central element',
-            'Add supporting details and labels step by step',
-            'Use different colors to highlight important parts',
-            'Encourage students to explain what they see'
-        ],
-        blackboardSteps: [
-            'Begin by drawing the main shape or structure in the center',
-            'Add the primary components with clear, simple lines',
-            'Include arrows and connecting lines to show relationships',
-            'Label each part clearly with easy-to-read text',
-            'Add final details and ask students to explain the diagram'
-        ],
-        svgContent: `<svg width="400" height="300" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
-      <rect x="50" y="50" width="300" height="200" fill="none" stroke="black" stroke-width="2"/>
-      <circle cx="200" cy="150" r="60" fill="none" stroke="black" stroke-width="2"/>
-      <text x="200" y="155" text-anchor="middle" font-family="Arial" font-size="14" fill="black">${description.split(' ')[0]}</text>
-      <text x="200" y="280" text-anchor="middle" font-family="Arial" font-size="12" fill="black">${subject} - ${gradeLevel}</text>
-    </svg>`
-    };
-    res.json({
-        success: true,
-        data: visualAid
-    });
-});
+}));
 // Start server
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-    console.log(`🚀 Sahayak Structured Server v3.0 running on port ${PORT}`);
-    console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-    console.log(`⚡ Direct Gemini 2.0 Flash (stable) with structured outputs`);
-    console.log(`🎯 Rich content quality with cultural context`);
-    console.log(`🇮🇳 Enhanced Indian cultural integration`);
-    console.log(`🏆 Hackathon-ready with Google AI technologies`);
+    console.log(`🚀 Sahayak Server v3.1 running on port ${PORT}`);
 });
 //# sourceMappingURL=index.js.map

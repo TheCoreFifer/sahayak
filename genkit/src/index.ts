@@ -1,17 +1,24 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import { SpeechClient } from '@google-cloud/speech';
+import asyncHandler from 'express-async-handler';
 
 // Load environment variables
 dotenv.config();
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+if (!API_KEY) {
+  throw new Error('Missing required API key. Set GEMINI_API_KEY or GOOGLE_AI_API_KEY in .env');
+}
+
+const genAI = new GoogleGenerativeAI(API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // Using the correct model name
 
 // Configure multer for file uploads
 const upload = multer({
@@ -26,6 +33,37 @@ const upload = multer({
       cb(null, true);
     } else {
       cb(new Error('Only PDF and Word documents are allowed'));
+    }
+  }
+});
+
+// --- AUDIO ASSESSMENT CONFIGURATION ---
+const audioStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../uploads/audio');
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, `audio-${uniqueSuffix}${path.extname(file.originalname)}`);
+  }
+});
+
+const audioUpload = multer({
+  storage: audioStorage,
+  limits: {
+    fileSize: Number(process.env.MAX_AUDIO_SIZE_MB || 10) * 1024 * 1024, // Fixed type error with Number()
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = (process.env.ALLOWED_AUDIO_TYPES || 'audio/wav,audio/webm,audio/ogg').split(',');
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type. Allowed types: ${allowedTypes.join(', ')}`));
     }
   }
 });
@@ -46,12 +84,12 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     version: '3.0.0',
-    model: 'gemini-2.0-flash',
+    model: 'gemini-pro',
     framework: 'direct-gemini-structured',
     hackathonReady: true
   });
@@ -382,7 +420,13 @@ MANDATORY JSON FORMAT - EXACTLY ${numQuestions} QUESTIONS:
       "skill": "Reading Comprehension", 
       "difficulty": "medium",
       "culturalContext": "How this question relates to Indian culture"
-    }${numQuestions > 2 ? ',\n    {\n      "id": "q3",\n      "type": "multipleChoice",\n      "question": "Question 3 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option C",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 3 ? ',\n    {\n      "id": "q4",\n      "type": "multipleChoice",\n      "question": "Question 4 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option D",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 4 ? ',\n    {\n      "id": "q5",\n      "type": "multipleChoice",\n      "question": "Question 5 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option A",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 5 ? ',\n    {\n      "id": "q6",\n      "type": "multipleChoice",\n      "question": "Question 6 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option B",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 6 ? ',\n    {\n      "id": "q7",\n      "type": "multipleChoice",\n      "question": "Question 7 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option C",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 7 ? ',\n    {\n      "id": "q8",\n      "type": "multipleChoice",\n      "question": "Question 8 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option D",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}
+    }${numQuestions > 2 ? ',\n    {\n      "id": "q3",\n      "type": "multipleChoice",\n      "question": "Question 3 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option C",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 3 ? ',\n    {\n      "id": "q4",\n      "type": "multipleChoice",\n      "question": "Question 4 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option D",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 4 ? ',\n    {\n      "id": "q5",\n      "type": "multipleChoice",\n      "question": "Question 5 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option A",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",\n      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 5 ? ',\n    {\n      "id": "q6",\n      "type": "multipleChoice",\n      "question": "Question 6 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option B",
+      "points": 2,
+      "skill": "Reading Comprehension", 
+      "difficulty": "medium",
+      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 6 ? ',\n    {\n      "id": "q7",\n      "type": "multipleChoice",\n      "question": "Question 7 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option C",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",
+      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}${numQuestions > 7 ? ',\n    {\n      "id": "q8",\n      "type": "multipleChoice",\n      "question": "Question 8 with Indian cultural context",\n      "options": ["Option A", "Option B", "Option C", "Option D"],\n      "correctAnswer": "Option D",\n      "points": 2,\n      "skill": "Reading Comprehension", \n      "difficulty": "medium",
+      "culturalContext": "How this question relates to Indian culture"\n    }' : ''}
   ],
   "totalCount": ${numQuestions}
 }
@@ -580,7 +624,7 @@ VERIFY YOUR COUNT MATCHES: ${numQuestions}
       requested: numQuestions,
       generated: parsedQuestions.questions.length,
       match: numQuestions === parsedQuestions.totalCount,
-      model: 'gemini-2.0-flash'
+      model: 'gemini-pro'
     });
     
   } catch (error) {
@@ -1895,6 +1939,264 @@ app.post('/api/generate-visual-aid', (req, res) => {
     data: visualAid
   });
 });
+
+// --- AUDIO ASSESSMENT ENDPOINTS ---
+
+// Generate Reading Passage
+app.post('/generate-passage', asyncHandler(async (req: any, res: any) => {
+  try {
+    console.log('📝 Received passage generation request:', {
+      grade: req.body.grade,
+      subject: req.body.subject,
+      topic: req.body.topic
+    });
+
+    const { grade, subject, topic, language = 'English', culturalContext = 'Indian educational context' } = req.body;
+    
+    if (!grade || !subject) {
+      console.error('❌ Missing required fields:', { grade, subject });
+      throw new Error('Grade and subject are required');
+    }
+
+    console.log('🔄 Generating passage with Gemini...');
+    const prompt = `Generate a reading passage for grade ${grade} students studying ${subject}.
+    Topic: ${topic || subject}
+    Language: ${language}
+    Cultural Context: ${culturalContext}
+
+    Requirements:
+    - Appropriate length for grade level
+    - Include cultural references and examples
+    - Use grade-appropriate vocabulary
+    - Include 2-3 key concepts or learning points
+    - End with 2-3 discussion questions
+
+    Format the response as a JSON object with these fields:
+    {
+      "title": "Passage title",
+      "content": "The actual passage text",
+      "gradeLevel": "Target grade level",
+      "subject": "Subject area",
+      "keyPoints": ["Point 1", "Point 2", "Point 3"],
+      "discussionQuestions": ["Question 1?", "Question 2?", "Question 3?"],
+      "vocabulary": ["Word 1", "Word 2", "Word 3"]
+    }`;
+
+    const result = await model.generateContent(prompt);
+    console.log('✅ Received response from Gemini');
+    
+    const response = await result.response;
+    const text = response.text();
+    console.log('📄 Raw response:', text.substring(0, 100) + '...');
+    
+    try {
+      const parsedResponse = JSON.parse(text.trim());
+      console.log('✅ Successfully parsed JSON response');
+      res.json({
+        success: true,
+        passage: parsedResponse
+      });
+    } catch (parseError) {
+      console.error('❌ Failed to parse AI response:', parseError);
+      console.error('Raw text causing parse error:', text);
+      throw new Error('Failed to generate valid reading passage - JSON parsing error');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error in passage generation:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
+    });
+  }
+}));
+
+// Analyze Audio Recording
+app.post('/api/analyze-audio', audioUpload.single('audio'), asyncHandler(async (req, res) => {
+  try {
+    if (!req.file) {
+      throw new Error('No audio file provided');
+    }
+
+    const { originalText, studentInfo } = req.body;
+    if (!originalText || !studentInfo) {
+      throw new Error('Missing required fields: originalText, studentInfo');
+    }
+
+    console.log('🎙️ Analyzing Reading Performance:');
+    console.log(`- Student: ${studentInfo.name}`);
+    console.log(`- Grade: ${studentInfo.grade}`);
+    console.log(`- Subject: ${studentInfo.subject}`);
+
+    // 1. Convert audio file to base64
+    const audioBuffer = fs.readFileSync(req.file.path);
+    const audioContent = audioBuffer.toString('base64');
+
+    // 2. Use Google Cloud Speech-to-Text for transcription
+    const speechClient = new SpeechClient();
+    const [response] = await speechClient.recognize({
+      audio: { content: audioContent },
+      config: {
+        encoding: 'LINEAR16',
+        sampleRateHertz: 16000,
+        languageCode: 'en-US',
+        enableWordTimeOffsets: true,
+        enableAutomaticPunctuation: true,
+        model: 'default'
+      }
+    });
+
+    // Extract transcription and word timings
+    const transcription = response.results
+      ?.map(result => result.alternatives?.[0]?.transcript)
+      .filter(Boolean)
+      .join(' ') || '';
+
+    const wordTimings = response.results
+      ?.flatMap(result => result.alternatives?.[0]?.words || [])
+      .map(wordInfo => ({
+        word: wordInfo.word || '',
+        startTime: wordInfo.startTime?.seconds || 0,
+        endTime: wordInfo.endTime?.seconds || 0
+      })) || [];
+
+    // 3. Use Gemini to analyze the reading performance
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    
+    const analysisPrompt = `
+    You are an expert reading teacher analyzing a student's reading performance.
+    
+    Original Text:
+    "${originalText}"
+    
+    Student's Transcription:
+    "${transcription}"
+    
+    Word Timing Data:
+    ${JSON.stringify(wordTimings)}
+    
+    Student Info:
+    - Name: ${studentInfo.name}
+    - Grade: ${studentInfo.grade}
+    - Subject: ${studentInfo.subject}
+    
+    Analyze the reading performance and provide a detailed assessment. Include:
+    1. Accuracy percentage (words read correctly)
+    2. Words per minute calculation
+    3. Fluency score (1-10)
+    4. List of mispronounced or skipped words
+    5. Analysis of pacing and expression
+    6. Specific positive feedback
+    7. Actionable tips for improvement
+    
+    Respond with a JSON object matching this structure:
+    {
+      "accuracy": 95,
+      "wordsPerMinute": 120,
+      "fluencyScore": 8,
+      "pronunciationHotspots": ["difficult", "words"],
+      "positiveFeedback": "Great job with...",
+      "actionableTip": "Try practicing...",
+      "detailedAnalysis": {
+        "hesitations": [{"word": "example", "count": 2}],
+        "mispronunciations": [{"word": "difficult", "correctSound": "dif-i-cult"}],
+        "pacing": {
+          "overallPace": "good",
+          "sectionsOfConcern": [{"text": "this part", "issue": "too fast"}]
+        },
+        "expressiveness": {
+          "score": 7,
+          "feedback": "Good expression when..."
+        }
+      }
+    }
+    `;
+    
+    const analysisResult = await model.generateContent(analysisPrompt);
+    const analysisText = analysisResult.response.text();
+    
+    try {
+      const parsedAnalysis = JSON.parse(analysisText);
+      console.log('✅ Successfully analyzed reading performance');
+      
+      // Clean up the audio file
+      fs.unlinkSync(req.file.path);
+      
+      res.json({
+        success: true,
+        data: parsedAnalysis
+      });
+    } catch (parseError) {
+      console.error('❌ Failed to parse analysis:', parseError);
+      // Clean up the audio file even if analysis fails
+      fs.unlinkSync(req.file.path);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to analyze reading performance'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error analyzing reading:', error);
+    // Clean up the audio file if it exists
+    if (req.file?.path) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to analyze reading'
+    });
+  }
+}));
+
+// Save Assessment to Google Sheets
+app.post('/api/save-assessment', async (req, res) => {
+  try {
+    const { studentName, result } = req.body;
+    const savedData = await saveToSheets(studentName, result);
+    res.json({
+      success: true,
+      data: savedData
+    });
+  } catch (error) {
+    console.error('❌ Error saving to Google Sheets:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to save assessment'
+    });
+  }
+});
+
+// Generate Assessment Report as Google Doc
+app.post('/api/generate-report', async (req, res) => {
+  try {
+    const { studentName, result } = req.body;
+    const report = await generateReport(studentName, result);
+    res.json({
+      success: true,
+      data: report
+    });
+  } catch (error) {
+    console.error('❌ Error generating report:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to generate report'
+    });
+  }
+});
+
+// Helper function to save assessment results to Google Sheets
+async function saveToSheets(studentName: string, result: any) {
+  // TODO: Implement Google Sheets integration
+  throw new Error('Google Sheets integration not implemented');
+}
+
+// Helper function to generate a Google Doc report
+async function generateReport(studentName: string, result: any) {
+  // TODO: Implement Google Docs integration
+  throw new Error('Google Docs integration not implemented');
+}
 
 // Start server
 const PORT = process.env.PORT || 3001;

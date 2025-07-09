@@ -69,7 +69,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
       href: '/assessments',
       icon: FiMic,
       description: 'Voice Evaluations',
-      comingSoon: true
+      comingSoon: false
     },
     { 
       name: 'Educational Games', 
